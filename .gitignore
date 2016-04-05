@@ -1,3 +1,12 @@
 *.pyc
 *.swp
 *.log
+
+distribution/*
+mDrawGui/*
+mDrawHtml/*
+firmwares/car_robot
+firmwares/eggbot
+firmawares/morgan
+firmwares/scara
+firmwares/spider
