@@ -3,6 +3,11 @@
 #include <SoftwareSerial.h>
 #include <Wire.h>
 
+#include <TimerOne.h>
+
+#define DEFAULT_FPS          15
+#define DEFAULT_FLASHTIME    3000
+
 // data stored in eeprom
 static union{
     struct{
@@ -13,8 +18,10 @@ static union{
       int height;
       int width;
       int speed;
-      int penUpPos;
-      int penDownPos;
+      int frameInterval; // framerate^{-1} in μs
+      int flashTime;
+      //int penUpPos;
+      //int penDownPos;
     }data;
     char buf[64];
 }roboSetup;
@@ -39,9 +46,10 @@ int xlimit_pin1 = xlimit.pin1();  //limit 4
 int xlimit_pin2 = xlimit.pin2();  //limit 3
 long last_time;
 MeDCMotor laser(M2);
-MePort servoPort(PORT_7);
-int servopin =  servoPort.pin2();
-Servo servoPen;
+MePort triggerPort(PORT_7);
+int triggerPin =  triggerPort.pin2();
+int triggerState;
+// Servo servoPen;
 
 /************** motor movements ******************/
 void stepperMoveA(int dir)
@@ -308,30 +316,30 @@ void parseLaserPower(char * cmd)
   laser.run(pwm);
 }
 
-void parsePen(char * cmd)
-{
-  char * tmp;
-  strtok_r(cmd, " ", &tmp);
-  int pos = atoi(tmp);
-  servoPen.write(pos);
-}
+// void parsePen(char * cmd)
+// {
+//   char * tmp;
+//   strtok_r(cmd, " ", &tmp);
+//   int pos = atoi(tmp);
+//   servoPen.write(pos);
+// }
 
-void parsePenPosSetup(char * cmd)
-{
-  char * tmp;
-  char * str;
-  str = strtok_r(cmd, " ", &tmp);
-  while(str!=NULL){
-    str = strtok_r(0, " ", &tmp);
-    if(str[0]=='U'){
-      roboSetup.data.penUpPos = atoi(str+1);
-    }else if(str[0]=='D'){
-      roboSetup.data.penDownPos = atoi(str+1);    
-    }
-  }
-  //Serial.printf("M2 U:%d D:%d\r\n",roboSetup.data.penUpPos,roboSetup.data.penDownPos);
-  syncRobotSetup();
-}
+// void parsePenPosSetup(char * cmd)
+// {
+//   char * tmp;
+//   char * str;
+//   str = strtok_r(cmd, " ", &tmp);
+//   while(str!=NULL){
+//     str = strtok_r(0, " ", &tmp);
+//     if(str[0]=='U'){
+//       roboSetup.data.penUpPos = atoi(str+1);
+//     }else if(str[0]=='D'){
+//       roboSetup.data.penDownPos = atoi(str+1);
+//     }
+//   }
+//   //Serial.printf("M2 U:%d D:%d\r\n",roboSetup.data.penUpPos,roboSetup.data.penDownPos);
+//   syncRobotSetup();
+// }
 
 void parseMcode(char * cmd)
 {
@@ -339,10 +347,10 @@ void parseMcode(char * cmd)
   code = atoi(cmd);
   switch(code){
     case 1:
-      parsePen(cmd);
+            //parsePen(cmd);
       break;
     case 2: // set pen position
-      parsePenPosSetup(cmd);
+            //parsePenPosSetup(cmd);
       break;
     case 3:
       parseAuxDelay(cmd);
@@ -374,7 +382,7 @@ void parseGcode(char * cmd)
     case 28: // home
       stepAuxDelay = 0;
       tarX=0; tarY=0;
-      servoPen.write(roboSetup.data.penUpPos);
+//      servoPen.write(roboSetup.data.penUpPos);
       laser.run(0);
       goHome();
       break; 
@@ -415,8 +423,10 @@ void initRobotSetup()
     roboSetup.data.height = HEIGHT;
     roboSetup.data.motorSwitch = 0;
     roboSetup.data.speed = 80;
-    roboSetup.data.penUpPos = 160;
-    roboSetup.data.penDownPos = 90;
+    roboSetup.data.frameInterval = 1000000 * (1 / DEFAULT_FPS); // TODO: isn't this going to be out of bounds?
+    roboSetup.data.flashTime = DEFAULT_FLASHTIME;
+    //roboSetup.data.penUpPos = 160;
+    //roboSetup.data.penDownPos = 90;
     syncRobotSetup();
   }
   // init motor direction
@@ -437,6 +447,19 @@ void initRobotSetup()
   stepdelay_max = spd*100;
 }
 
+void triggerIRQ(void){
+  if (triggerState == LOW){
+    triggerState = HIGH;
+    Timer1.setPeriod(roboSetup.data.flashTime); // TODO: throw this out of EEPROM
+  }
+  else {
+    triggerState = LOW;
+    Timer1.setPeriod(roboSetup.data.frameInterval); // TODO: this out of EEPROM
+  }
+
+  digitalWrite(triggerPin, triggerState);
+}
+
 
 /************** arduino ******************/
 void setup() {
@@ -447,10 +470,14 @@ void setup() {
   Serial.begin(115200);
   initRobotSetup();
   initPosition();
-  servoPen.attach(servopin);
-  delay(100);
-  servoPen.write(roboSetup.data.penUpPos);
-  laser.run(0);
+//servoPen.attach(triggerPin);
+  pinMode(triggerPin, OUTPUT);
+//  delay(100);
+//  servoPen.write(roboSetup.data.penUpPos);
+//  laser.run(0);
+
+  Timer1.initialize(frameInterval); // TODO: initialize this variable!
+  Timer1.attachInterrupt(triggerIRQ);
 }
 
 char buf[64];
